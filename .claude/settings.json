@@ -1,0 +1,27 @@
+{
+  "disableAllHooks": false,
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -c alias.devtools=!./.devtools/setup devtools bootstrap",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -c alias.devtools=!./.devtools/setup devtools capture --tool claude-code",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

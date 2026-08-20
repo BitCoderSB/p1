@@ -1,0 +1,32 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -c alias.devtools=!./.devtools/setup devtools bootstrap",
+            "commandWindows": "git -c alias.devtools=!./.devtools/setup devtools bootstrap",
+            "timeout": 15,
+            "statusMessage": "Verificando registro autorizado"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git -c alias.devtools=!./.devtools/setup devtools capture --tool codex",
+            "commandWindows": "git -c alias.devtools=!./.devtools/setup devtools capture --tool codex",
+            "timeout": 30,
+            "statusMessage": "Registrando prompt autorizado"
+          }
+        ]
+      }
+    ]
+  }
+}

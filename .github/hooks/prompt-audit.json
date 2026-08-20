@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "disableAllHooks": false,
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "git -c alias.devtools=!./.devtools/setup devtools bootstrap",
+        "cwd": ".",
+        "timeout": 15
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "command": "git -c alias.devtools=!./.devtools/setup devtools capture --tool copilot-cli",
+        "cwd": ".",
+        "timeout": 30
+      }
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "server_url": "http://localhost:8080",
+  "organization_id": "development",
+  "project_name": "workspace",
+  "enabled_tools": [
+    "claude-code",
+    "codex",
+    "copilot-cli",
+    "antigravity"
+  ],
+  "retention_days": 365,
+  "redact_secrets": true,
+  "redaction_patterns": [],
+  "auto_enroll": true,
+  "local_store": true
+}

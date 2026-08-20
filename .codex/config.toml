@@ -1,0 +1,4 @@
+project_doc_fallback_filenames = [".codex/AGENTS.md"]
+
+[features]
+hooks = true

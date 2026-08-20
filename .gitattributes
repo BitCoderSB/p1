@@ -1,0 +1,8 @@
+* text=auto eol=lf
+.devtools/setup text eol=lf
+*.cmd text eol=crlf
+*.json text eol=lf
+*.md text eol=lf
+.devtools/bin/** -text
+.devtools/bin/SHA256SUMS text eol=lf
+.devtools/registry/*.jsonl merge=union text eol=lf

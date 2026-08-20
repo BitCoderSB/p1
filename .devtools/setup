@@ -1,0 +1,233 @@
+#!/usr/bin/env sh
+set -u
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  if [ "${1:-}" = capture ]; then
+    printf 'devtools: repository root could not be resolved\n' >&2
+    exit 2
+  fi
+  exit 1
+}
+marker="$repo_root/.devtools/local-store/.initialized"
+case "$(uname -s)" in
+  Darwin*) target_os=macos ;;
+  Linux*) target_os=linux ;;
+  MINGW*|MSYS*|CYGWIN*) target_os=windows ;;
+  *) printf 'Unsupported operating system\n' >&2; exit 1 ;;
+esac
+case "$(uname -m)" in
+  x86_64|amd64) target_arch=amd64 ;;
+  arm64|aarch64) target_arch=arm64 ;;
+  *) printf 'Unsupported architecture\n' >&2; exit 1 ;;
+esac
+extension=
+[ "$target_os" = windows ] && extension=.exe
+binary="$repo_root/.devtools/bin/$target_os/$target_arch/setup$extension"
+checksums="$repo_root/.devtools/bin/SHA256SUMS"
+binary_relative="$target_os/$target_arch/setup$extension"
+verify_local_paths() {
+  health="$repo_root/.devtools/local-store/health.log"
+  for owned_path in \
+    "$repo_root/.devtools" \
+    "$repo_root/.devtools/bin" \
+    "$repo_root/.devtools/bin/$target_os" \
+    "$repo_root/.devtools/bin/$target_os/$target_arch" \
+    "$checksums" \
+    "$binary" \
+    "$repo_root/.devtools/local-store" \
+    "$marker" \
+    "$health"
+  do
+    if [ -L "$owned_path" ]; then
+      printf 'devtools: linked or redirected project path refused: %s\n' "$owned_path" >&2
+      return 21
+    fi
+  done
+  [ ! -e "$repo_root/.devtools" ] || [ -d "$repo_root/.devtools" ] || return 21
+  [ ! -e "$repo_root/.devtools/bin" ] || [ -d "$repo_root/.devtools/bin" ] || return 21
+  [ ! -e "$checksums" ] || [ -f "$checksums" ] || return 21
+  [ ! -e "$binary" ] || [ -f "$binary" ] || return 21
+  [ ! -e "$repo_root/.devtools/local-store" ] || [ -d "$repo_root/.devtools/local-store" ] || return 21
+  [ ! -e "$marker" ] || [ -f "$marker" ] || return 21
+  [ ! -e "$health" ] || [ -f "$health" ] || return 21
+  return 0
+}
+record_health() {
+  verify_local_paths >/dev/null 2>&1 || return 0
+  health_dir="$repo_root/.devtools/local-store"
+  mkdir -p "$health_dir" 2>/dev/null || return 0
+  {
+    date -u '+[%Y-%m-%dT%H:%M:%SZ]'
+    printf '%s\n' "$1"
+  } >>"$health_dir/health.log" 2>/dev/null || true
+  chmod 600 "$health_dir/health.log" 2>/dev/null || true
+}
+write_marker() {
+  verify_local_paths || return $?
+  marker_dir="$repo_root/.devtools/local-store"
+  mkdir -p "$marker_dir" || return 1
+  marker_tmp=$(mktemp "$marker_dir/.initialized-XXXXXX") || return 1
+  if ! printf '%s\n' "$marker_value" >"$marker_tmp"; then
+    rm -f "$marker_tmp"
+    return 1
+  fi
+  chmod 600 "$marker_tmp" 2>/dev/null || {
+    rm -f "$marker_tmp"
+    return 1
+  }
+  if ! mv -f "$marker_tmp" "$marker"; then
+    rm -f "$marker_tmp"
+    return 1
+  fi
+  return 0
+}
+verify_binary() {
+  if [ ! -f "$checksums" ]; then
+    printf 'devtools: checksum manifest is missing\n' >&2
+    return 20
+  fi
+  manifest_size=$(wc -c <"$checksums" 2>/dev/null) || {
+    printf 'devtools: checksum manifest cannot be measured\n' >&2
+    return 20
+  }
+  if [ "$manifest_size" -le 0 ] || [ "$manifest_size" -gt 4096 ]; then
+    printf 'devtools: checksum manifest has an invalid size\n' >&2
+    return 20
+  fi
+  manifest_lines=$(wc -l <"$checksums" 2>/dev/null) || {
+    printf 'devtools: checksum manifest cannot be counted\n' >&2
+    return 20
+  }
+  if [ "$manifest_lines" -ne 6 ]; then
+    printf 'devtools: checksum manifest must contain six LF-terminated lines\n' >&2
+    return 20
+  fi
+  expected=$(
+    awk -v wanted="$binary_relative" '
+      BEGIN {
+        valid = 1
+      }
+      {
+        hash = substr($0, 1, 64)
+        separator = substr($0, 65, 2)
+        path = substr($0, 67)
+        if (length(hash) != 64 || hash ~ /[^0-9a-f]/ || separator != "  ") {
+          valid = 0
+        }
+        if (seen[path]++) {
+          valid = 0
+        }
+        hashes[path] = hash
+      }
+      END {
+        allowed["windows/amd64/setup.exe"] = 1
+        allowed["windows/arm64/setup.exe"] = 1
+        allowed["linux/amd64/setup"] = 1
+        allowed["linux/arm64/setup"] = 1
+        allowed["macos/amd64/setup"] = 1
+        allowed["macos/arm64/setup"] = 1
+        if (NR != 6) {
+          valid = 0
+        }
+        for (path in allowed) {
+          if (seen[path] != 1) {
+            valid = 0
+          }
+        }
+        for (path in seen) {
+          if (!allowed[path]) {
+            valid = 0
+          }
+        }
+        if (valid != 0 && hashes[wanted] != "") {
+          print hashes[wanted]
+        } else {
+          exit 1
+        }
+      }
+    ' "$checksums"
+  ) || {
+    printf 'devtools: checksum manifest is malformed or incomplete\n' >&2
+    return 20
+  }
+  if [ -z "$expected" ]; then
+    printf 'devtools: checksum manifest is malformed or incomplete\n' >&2
+    return 20
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$binary" 2>/dev/null | awk '{ print $1 }')
+  elif command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "$binary" 2>/dev/null | awk '{ print $1 }')
+  else
+    printf 'devtools: no SHA-256 verifier is available\n' >&2
+    return 20
+  fi
+  if [ -z "$actual" ] || [ "$actual" != "$expected" ]; then
+    printf 'devtools: agent checksum mismatch; execution refused\n' >&2
+    return 20
+  fi
+  return 0
+}
+verify_local_paths
+status=$?
+if [ "$status" -ne 0 ]; then
+  [ "${1:-}" = capture ] && exit 2
+  exit "$status"
+fi
+verify_binary
+status=$?
+if [ "$status" -ne 0 ]; then
+  if [ "${1:-}" = capture ]; then
+    record_health 'capture refused: binary integrity verification failed'
+    exit 2
+  fi
+  exit "$status"
+fi
+marker_value="v2:$expected"
+if [ "${1:-}" = bootstrap ]; then
+  current_marker=
+  [ -f "$marker" ] && IFS= read -r current_marker <"$marker"
+  if [ "$current_marker" = "$marker_value" ]; then
+    "$binary" activate >/dev/null
+    exit $?
+  fi
+  "$binary" init >/dev/null
+  bootstrap_status=$?
+  if [ "$bootstrap_status" -eq 0 ]; then
+    write_marker || bootstrap_status=$?
+  fi
+  exit "$bootstrap_status"
+fi
+if [ "${1:-}" = capture ]; then
+  capture_error=$(mktemp "${TMPDIR:-/tmp}/prompt-audit-capture-XXXXXX") || exit 2
+  PROMPT_AUDIT_REPOSITORY_ROOT=$repo_root
+  export PROMPT_AUDIT_REPOSITORY_ROOT
+  "$binary" "$@" 2>"$capture_error"
+  capture_status=$?
+  if [ -s "$capture_error" ]; then
+    record_health 'capture reported an error; prompt text was not copied to this log'
+    cat "$capture_error" >&2
+  fi
+  rm -f "$capture_error"
+  if [ "$capture_status" -ne 0 ]; then
+    exit 2
+  fi
+  exit 0
+fi
+if [ "${1:-}" = recover ]; then
+  "$binary" "$@" >/dev/null 2>&1
+  recover_status=$?
+  if [ "$recover_status" -ne 0 ]; then
+    record_health 'history recovery failed; run recover again to retry'
+  fi
+  exit "$recover_status"
+fi
+if [ "${1:-}" = init ]; then
+  "$binary" "$@" >/dev/null
+else
+  "$binary" "$@"
+fi
+status=$?
+if [ "${1:-}" = init ] && [ "$status" -eq 0 ]; then
+  write_marker || status=$?
+fi
+exit $status
